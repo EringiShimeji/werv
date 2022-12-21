@@ -31,7 +31,7 @@ impl Lexer {
         let mut literal = c.to_string();
         let kind = match c {
             '"' => {
-                return Ok(Token::new(TokenKind::StringBody, self.read_string()?));
+                return Ok(Token::new(TokenKind::Str, self.read_string()?));
             }
             '<' => {
                 if self.peek_char() == '=' {
@@ -90,8 +90,9 @@ impl Lexer {
             }
             _ if self.is_ident_head() => {
                 let literal = self.read_ident();
+                let kind = TokenKind::lookup_kind(&literal);
 
-                return Ok(Token::new(TokenKind::lookup_kind(&literal), literal));
+                return Ok(Token::new(kind, literal));
             }
             _ => TokenKind::Unknown,
         };
@@ -154,6 +155,12 @@ impl Lexer {
         while self.ch != '"' {
             if self.ch == '\0' {
                 return Err(LexerReadStringError);
+            }
+
+            // エスケープ文字は二文字分読む
+            // ここではエスケープ文字を既定の文字に変換することは行わない
+            if self.ch == '\\' {
+                self.read_char();
             }
 
             self.read_char();

@@ -41,13 +41,11 @@ fn eval_statements(stmts: Vec<Statement>, env: &mut Environment) -> EResult {
 fn eval_statement(s: Statement, env: &mut Environment) -> EResult {
     match s {
         // TODO: 今はデバッグのためにExprStatementが値を返すようになっているが、本来は返さない
-        Statement::ExprStatement(e) => eval(e, env),
-        Statement::BlockReturnStatement(e) => eval_block_return_stmt(e, env),
-        Statement::LetStatement { name, value } => eval_let_stmt(name, value, env),
-        Statement::FunctionDefStatement { name, params, body } => {
-            eval_fn_def_stmt(name, params, body, env)
-        }
-        Statement::ReturnStatement(e) => eval(e, env),
+        Statement::ExprStmt(e) => eval(e, env),
+        Statement::BlockReturnStmt(e) => eval_block_return_stmt(e, env),
+        Statement::LetStmt { name, value } => eval_let_stmt(name, value, env),
+        Statement::LetFnStmt { name, params, body } => eval_fn_def_stmt(name, params, body, env),
+        Statement::ReturnStmt(e) => eval(e, env),
     }
 }
 

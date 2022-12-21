@@ -42,7 +42,6 @@ pub enum TokenKind {
 
     // キーワード
     Let,
-    Fn,
     Return,
     If,
     Else,
@@ -54,7 +53,7 @@ pub enum TokenKind {
     /// 数字
     Number,
     /// 文字列
-    StringBody,
+    Str,
 
     Unknown,
     EOF,
@@ -63,7 +62,6 @@ impl TokenKind {
     pub fn lookup_kind(literal: &str) -> TokenKind {
         match literal {
             "let" => TokenKind::Let,
-            "fn" => TokenKind::Fn,
             "return" => TokenKind::Return,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,

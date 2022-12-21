@@ -5,8 +5,8 @@ use crate::token::{Token, TokenKind::*};
 fn next_token_test() {
     let input = r#"
 let _aA10 = 1 + 2 - 3 * 4 / 5; 
-fn fib(n) = fib(n-1) + fib(n-2);
-fn add(a, b) = {
+let fib(n) = fib(n-1) + fib(n-2);
+let add(a, b) = {
     return a + b;
 };
 // this is a test comment
@@ -18,7 +18,7 @@ comment !!!
  */
 
  // bla
-fn only_odd(n) = if n % 2 { n } else { 0 };
+let only_odd(n) = if n % 2 n else 0;
 if 1==1 { 
     // block inner comment
     !false 
@@ -44,7 +44,7 @@ if 1==1 {
         (Slash, "/"),
         (Number, "5"),
         (SemiColon, ";"),
-        (Fn, "fn"),
+        (Let, "let"),
         (Ident, "fib"),
         (LParen, "("),
         (Ident, "n"),
@@ -64,7 +64,7 @@ if 1==1 {
         (Number, "2"),
         (RParen, ")"),
         (SemiColon, ";"),
-        (Fn, "fn"),
+        (Let, "let"),
         (Ident, "add"),
         (LParen, "("),
         (Ident, "a"),
@@ -80,7 +80,7 @@ if 1==1 {
         (SemiColon, ";"),
         (RBrace, "}"),
         (SemiColon, ";"),
-        (Fn, "fn"),
+        (Let, "let"),
         (Ident, "only_odd"),
         (LParen, "("),
         (Ident, "n"),
@@ -90,13 +90,9 @@ if 1==1 {
         (Ident, "n"),
         (Percent, "%"),
         (Number, "2"),
-        (LBrace, "{"),
         (Ident, "n"),
-        (RBrace, "}"),
         (Else, "else"),
-        (LBrace, "{"),
         (Number, "0"),
-        (RBrace, "}"),
         (SemiColon, ";"),
         (If, "if"),
         (Number, "1"),
@@ -134,7 +130,7 @@ if 1==1 {
         (Ge, ">="),
         (Number, "10"),
         (SemiColon, ";"),
-        (StringBody, "input123"),
+        (Str, "input123"),
         (SemiColon, ";"),
         (EOF, "\0"),
     ];

@@ -1,4 +1,5 @@
 mod error;
+mod escape;
 #[cfg(test)]
 mod test;
 use crate::{
@@ -10,147 +11,169 @@ use crate::{
     token::{Token, TokenKind},
 };
 
-use self::error::{ParseError, ParseError::*};
+use self::{
+    error::{ParseError, ParseError::*},
+    escape::escape,
+};
 
 type PResult<T> = Result<T, ParseError>;
 
 pub struct Parser {
     lexer: Lexer,
     cur_token: Token,
-    peek_token: Token,
 }
 impl Parser {
     pub fn new(lexer: Lexer) -> Parser {
         let mut p = Parser {
             lexer,
             cur_token: Token::default(),
-            peek_token: Token::default(),
         };
 
         p.next_token();
-        p.next_token();
         p
+    }
+
+    fn is_eof(&self) -> bool {
+        self.cur_token.kind() == TokenKind::EOF
+    }
+
+    fn next_token(&mut self) -> Option<LexerError> {
+        self.cur_token = self.lexer.next_token().ok()?;
+
+        None
+    }
+
+    fn consume(&mut self, kind: TokenKind) -> PResult<Token> {
+        if self.cur_token.kind() != kind {
+            return Err(ParseConsumeError {
+                expected: kind,
+                got: self.cur_token.kind(),
+            });
+        }
+
+        let token = self.cur_token.clone();
+
+        self.next_token()
+            .map_or(Ok(()), |e| Err(ParseNextTokenError(e)))?;
+        Ok(token)
+    }
+
+    fn is_cur(&self, kind: TokenKind) -> bool {
+        self.cur_token.kind() == kind
     }
 
     pub fn parse(&mut self) -> PResult<Node> {
         let mut stmts = Vec::new();
 
         while !self.is_eof() {
-            stmts.push(self.parse_statement()?);
+            stmts.push(self.parse_stmt()?);
         }
 
         Ok(Node::Program(stmts))
     }
 
-    fn parse_statement(&mut self) -> PResult<Statement> {
-        let stmt = self.parse_statement_body()?;
-
-        self.consume(TokenKind::SemiColon)?;
-        Ok(stmt)
-    }
-
-    fn parse_statement_body(&mut self) -> PResult<Statement> {
+    fn parse_stmt(&mut self) -> PResult<Statement> {
         match self.cur_token.kind() {
-            TokenKind::Let => self.parse_let_statement(),
-            TokenKind::Fn => self.parse_fn_statement(),
-            TokenKind::Return => self.parse_return_statement(),
-            _ => self.parse_expr_statement(),
+            TokenKind::Let => self.parse_let_stmt(),
+            TokenKind::Return => self.parse_return_stmt(),
+            _ => self.parse_expr_stmt(),
         }
     }
 
-    fn parse_return_statement(&mut self) -> PResult<Statement> {
-        self.consume(TokenKind::Return)?;
-
-        let expr = self.parse_expression()?;
-
-        Ok(ReturnStatement(expr))
-    }
-
-    fn parse_expr_statement(&mut self) -> PResult<Statement> {
-        let expr = self.parse_expression()?;
-        Ok(ExprStatement(expr))
-    }
-
-    fn parse_fn_statement(&mut self) -> PResult<Statement> {
-        self.consume(TokenKind::Fn)?;
-
-        let name = self.parse_ident()?;
-        let params = self.parse_params()?;
-
-        self.consume(TokenKind::Assign)?;
-
-        let body = self.parse_expression()?;
-
-        Ok(FunctionDefStatement { name, params, body })
-    }
-
-    fn parse_params(&mut self) -> PResult<Vec<Expression>> {
-        self.consume(TokenKind::LParen)?;
-
-        let mut params = Vec::new();
-
-        if self.consume(TokenKind::RParen).is_ok() {
-            return Ok(params);
-        }
-
-        params.push(self.parse_ident()?);
-
-        while !self.consume(TokenKind::RParen).is_ok() {
-            if self.is_eof() {
-                return Err(ParseParamsError);
-            }
-
-            self.consume(TokenKind::Comma)?;
-            params.push(self.parse_ident()?);
-        }
-
-        Ok(params)
-    }
-
-    fn parse_let_statement(&mut self) -> PResult<Statement> {
+    /// let_stmt = "let" ident ( "(" ( ident ( "," ident )* )? ")" )? "=" expr ";"
+    fn parse_let_stmt(&mut self) -> PResult<Statement> {
         self.consume(TokenKind::Let)?;
 
         let name = self.parse_ident()?;
 
+        // ident "(" ( ident ( "," ident )* )? ")" "=" expr ";"
+        if self.consume(TokenKind::LParen).is_ok() {
+            let mut params = Vec::new();
+
+            // ident "(" ")" "=" expr ";"
+            if self.consume(TokenKind::RParen).is_ok() {
+                self.consume(TokenKind::Assign)?;
+
+                let body = self.parse_expr()?;
+
+                self.consume(TokenKind::SemiColon)?;
+
+                return Ok(LetFnStmt { name, params, body });
+            }
+
+            // ident "(" ident ")"
+            params.push(self.parse_ident()?);
+
+            // ident "(" ident ( "," ident )* ")" "=" expr ";"
+            params.push(self.parse_expr()?);
+            while !self.consume(TokenKind::RParen).is_ok() {
+                if self.is_eof() {
+                    return Err(ParseCallExprError);
+                }
+
+                self.consume(TokenKind::Comma)?;
+
+                params.push(self.parse_ident()?);
+            }
+
+            self.consume(TokenKind::Assign)?;
+
+            let body = self.parse_expr()?;
+
+            self.consume(TokenKind::SemiColon)?;
+
+            return Ok(LetFnStmt { name, params, body });
+        };
+
         self.consume(TokenKind::Assign)?;
 
-        let value = self.parse_expression()?;
+        let value = self.parse_expr()?;
 
-        Ok(LetStatement { name, value })
+        self.consume(TokenKind::SemiColon)?;
+
+        Ok(LetStmt { name, value })
     }
 
-    fn parse_expression(&mut self) -> PResult<Expression> {
+    /// return_stmt = "return" expr ";"
+    fn parse_return_stmt(&mut self) -> PResult<Statement> {
+        self.consume(TokenKind::Return)?;
+
+        let expr = self.parse_expr()?;
+
+        self.consume(TokenKind::SemiColon)?;
+
+        Ok(ReturnStmt(expr))
+    }
+
+    /// expr_stmt = expr ";"?
+    fn parse_expr_stmt(&mut self) -> PResult<Statement> {
+        let expr = self.parse_expr()?;
+
+        self.consume(TokenKind::SemiColon);
+
+        Ok(ExprStmt(expr))
+    }
+
+    fn parse_expr(&mut self) -> PResult<Expression> {
         if self.is_cur(TokenKind::If) {
-            return self.parse_if();
+            return self.parse_if_expr();
         }
 
         if self.is_cur(TokenKind::LBrace) {
-            return self.parse_block();
+            return self.parse_block_expr();
         }
 
-        if self.is_cur(TokenKind::Bang)
-            || self.is_cur(TokenKind::True)
-            || self.is_cur(TokenKind::False)
-        {
-            return self.parse_bool();
-        }
-
-        self.parse_equal()
+        self.parse_comp()
     }
 
-    fn parse_if(&mut self) -> PResult<Expression> {
+    /// if_expr = "if" expr expr ( "else" expr )?
+    fn parse_if_expr(&mut self) -> PResult<Expression> {
         self.consume(TokenKind::If)?;
 
-        let condition = Box::new(self.parse_expression()?);
-        let consequence = Box::new(self.parse_block()?);
+        let condition = Box::new(self.parse_expr()?);
+        let consequence = Box::new(self.parse_expr()?);
         let alternative = if self.consume(TokenKind::Else).is_ok() {
-            let expr = if self.is_cur(TokenKind::If) {
-                self.parse_if()?
-            } else {
-                self.parse_block()?
-            };
-
-            Some(Box::new(expr))
+            Some(Box::new(self.parse_expr()?))
         } else {
             None
         };
@@ -162,129 +185,69 @@ impl Parser {
         })
     }
 
-    fn parse_block(&mut self) -> PResult<Expression> {
+    /// block_expr = "{" stmt* "}"
+    fn parse_block_expr(&mut self) -> PResult<Expression> {
         self.consume(TokenKind::LBrace)?;
 
         let mut stmts = Vec::new();
 
         while !self.consume(TokenKind::RBrace).is_ok() {
-            let stmt_body = self.parse_statement_body()?;
-
-            // もしセミコロンがない式で終わった場合
-            if !self.is_cur(TokenKind::SemiColon) {
-                if let Statement::ExprStatement(expr) = stmt_body {
-                    stmts.push(BlockReturnStatement(expr));
-                    self.consume(TokenKind::RBrace)?;
-                    break;
-                } else {
-                    return Err(ParseBlockError);
-                }
+            if self.is_eof() {
+                return Err(ParseBlockExprError);
             }
 
-            self.consume(TokenKind::SemiColon)?;
-            stmts.push(stmt_body);
+            stmts.push(self.parse_stmt()?);
         }
 
         Ok(BlockExpr(stmts))
     }
 
-    fn parse_bool(&mut self) -> PResult<Expression> {
-        self.parse_bool_unary()
-    }
-
-    fn parse_bool_unary(&mut self) -> PResult<Expression> {
-        if self.consume(TokenKind::Bang).is_ok() {
-            return Ok(UnaryExpr {
-                kind: Not,
-                expr: Box::new(self.parse_bool_unary()?),
-            });
-        }
-
-        self.parse_bool_primary()
-    }
-
-    fn parse_bool_primary(&mut self) -> PResult<Expression> {
-        if self.consume(TokenKind::True).is_ok() {
-            return Ok(Boolean(true));
-        }
-
-        if self.consume(TokenKind::False).is_ok() {
-            return Ok(Boolean(false));
-        }
-
-        self.parse_primary()
-    }
-
-    fn parse_equal(&mut self) -> PResult<Expression> {
-        let mut node = self.parse_relational()?;
+    /// comp = add ( "==" add | "!=" add | "<" add | "<=" add | ">" add | ">=" add )
+    fn parse_comp(&mut self) -> PResult<Expression> {
+        let mut node = self.parse_add()?;
 
         if self.consume(TokenKind::Eq).is_ok() {
             node = BinaryExpr {
                 kind: Eq,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_relational()?),
+                rhs: Box::new(self.parse_add()?),
             };
         } else if self.consume(TokenKind::Ne).is_ok() {
             node = BinaryExpr {
                 kind: Ne,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_relational()?),
-            };
-        }
-
-        Ok(node)
-    }
-
-    fn parse_relational(&mut self) -> PResult<Expression> {
-        let mut node = self.parse_mod()?;
-
-        if self.consume(TokenKind::Le).is_ok() {
-            node = BinaryExpr {
-                kind: Le,
-                lhs: Box::new(node),
-                rhs: Box::new(self.parse_mod()?),
+                rhs: Box::new(self.parse_add()?),
             };
         } else if self.consume(TokenKind::Lt).is_ok() {
             node = BinaryExpr {
                 kind: Lt,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_mod()?),
+                rhs: Box::new(self.parse_add()?),
             };
-        } else if self.consume(TokenKind::Ge).is_ok() {
+        } else if self.consume(TokenKind::Le).is_ok() {
             node = BinaryExpr {
-                kind: Ge,
+                kind: Le,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_mod()?),
+                rhs: Box::new(self.parse_add()?),
             };
         } else if self.consume(TokenKind::Gt).is_ok() {
             node = BinaryExpr {
                 kind: Gt,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_mod()?),
+                rhs: Box::new(self.parse_add()?),
+            };
+        } else if self.consume(TokenKind::Ge).is_ok() {
+            node = BinaryExpr {
+                kind: Ge,
+                lhs: Box::new(node),
+                rhs: Box::new(self.parse_add()?),
             };
         }
 
         Ok(node)
     }
 
-    fn parse_mod(&mut self) -> PResult<Expression> {
-        let mut node = self.parse_add()?;
-
-        loop {
-            if self.consume(TokenKind::Percent).is_ok() {
-                node = BinaryExpr {
-                    kind: Mod,
-                    lhs: Box::new(node),
-                    rhs: Box::new(self.parse_add()?),
-                };
-            } else {
-                break;
-            }
-        }
-
-        Ok(node)
-    }
-
+    /// add = mul ( "+" mul | "-" mul )*
     fn parse_add(&mut self) -> PResult<Expression> {
         let mut node = self.parse_mul()?;
 
@@ -309,6 +272,7 @@ impl Parser {
         Ok(node)
     }
 
+    /// mul = unary ( "*" unary | "/" unary | "%" unary )*
     fn parse_mul(&mut self) -> PResult<Expression> {
         let mut node = self.parse_unary()?;
 
@@ -325,6 +289,12 @@ impl Parser {
                     lhs: Box::new(node),
                     rhs: Box::new(self.parse_unary()?),
                 };
+            } else if self.consume(TokenKind::Percent).is_ok() {
+                node = BinaryExpr {
+                    kind: Mod,
+                    lhs: Box::new(node),
+                    rhs: Box::new(self.parse_unary()?),
+                };
             } else {
                 break;
             }
@@ -333,7 +303,9 @@ impl Parser {
         Ok(node)
     }
 
+    /// unary = ( "-" | "!" )? primary
     fn parse_unary(&mut self) -> PResult<Expression> {
+        // "-" primary
         if self.consume(TokenKind::Minus).is_ok() {
             return Ok(UnaryExpr {
                 kind: Minus,
@@ -341,74 +313,80 @@ impl Parser {
             });
         }
 
+        // "!" primary
+        if self.consume(TokenKind::Bang).is_ok() {
+            return Ok(UnaryExpr {
+                kind: Not,
+                expr: Box::new(self.parse_primary()?),
+            });
+        }
+
         self.parse_primary()
     }
 
+    /// primary = integer | ident ( "(" ( expr ( "," expr )* )? ")" )? | str | bool | "(" expr ")"
     fn parse_primary(&mut self) -> PResult<Expression> {
-        if self.is_cur(TokenKind::LParen) {
-            return self.parse_paren_expr();
+        // "(" expr ")"
+        if self.consume(TokenKind::LParen).is_ok() {
+            let expr = self.parse_expr()?;
+
+            self.consume(TokenKind::RParen)?;
+            return Ok(expr);
         }
 
+        // ident ( "(" ( expr ( "," expr )* )? ")" )?
         if self.is_cur(TokenKind::Ident) {
-            if self.is_peek(TokenKind::LParen) {
-                return self.parse_call_expression();
+            let name = self.parse_ident()?;
+
+            if self.consume(TokenKind::LParen).is_ok() {
+                let mut args = Vec::new();
+
+                // ident "(" ")"
+                if self.consume(TokenKind::RParen).is_ok() {
+                    return Ok(CallExpr {
+                        name: Box::new(name),
+                        args,
+                    });
+                }
+
+                // ident "(" expr ")"
+                args.push(self.parse_expr()?);
+
+                // ident "(" expr ( "," expr )* ")"
+                args.push(self.parse_expr()?);
+                while !self.consume(TokenKind::RParen).is_ok() {
+                    if self.is_eof() {
+                        return Err(ParseCallExprError);
+                    }
+
+                    self.consume(TokenKind::Comma)?;
+
+                    args.push(self.parse_expr()?);
+                }
+
+                return Ok(CallExpr {
+                    name: Box::new(name),
+                    args,
+                });
             }
 
-            return self.parse_ident();
+            return Ok(name);
         }
 
-        if self.is_cur(TokenKind::StringBody) {
-            return self.parse_string();
+        // str
+        if self.is_cur(TokenKind::Str) {
+            return self.parse_str();
+        }
+
+        // bool
+        if self.is_cur(TokenKind::True) || self.is_cur(TokenKind::False) {
+            return self.parse_bool();
         }
 
         return self.parse_integer();
     }
 
-    fn parse_call_expression(&mut self) -> PResult<Expression> {
-        let name = Box::new(self.parse_ident()?);
-        let args = self.parse_args()?;
-
-        Ok(CallExpr { name, args })
-    }
-
-    fn parse_args(&mut self) -> PResult<Vec<Expression>> {
-        self.consume(TokenKind::LParen)?;
-
-        let mut params = Vec::new();
-
-        if self.consume(TokenKind::RParen).is_ok() {
-            return Ok(params);
-        }
-
-        params.push(self.parse_expression()?);
-
-        while !self.consume(TokenKind::RParen).is_ok() {
-            if self.is_eof() {
-                return Err(ParseArgsError);
-            }
-
-            self.consume(TokenKind::Comma)?;
-            params.push(self.parse_expression()?);
-        }
-
-        Ok(params)
-    }
-
-    fn parse_paren_expr(&mut self) -> PResult<Expression> {
-        self.consume(TokenKind::LParen)?;
-
-        let expr = self.parse_expression()?;
-
-        self.consume(TokenKind::RParen)?;
-        return Ok(expr);
-    }
-
-    fn parse_string(&mut self) -> PResult<Expression> {
-        let str = self.consume(TokenKind::StringBody)?;
-
-        Ok(Str(str.literal()))
-    }
-
+    /// integer = [0-9]*
     fn parse_integer(&mut self) -> PResult<Expression> {
         let token = self.consume(TokenKind::Number)?;
         let value = token
@@ -419,39 +397,28 @@ impl Parser {
         Ok(Integer(value))
     }
 
+    /// ident = [A-z] | "_" ( [A-z0-9] | "_" )*
     fn parse_ident(&mut self) -> PResult<Expression> {
         let token = self.consume(TokenKind::Ident)?;
+
         Ok(Ident(token.literal()))
     }
 
-    fn is_eof(&self) -> bool {
-        self.cur_token.kind() == TokenKind::EOF
+    /// str = '"' ( (char except double quote and backslash) | "\" . ) '"'
+    fn parse_str(&mut self) -> PResult<Expression> {
+        let str = self.consume(TokenKind::Str)?;
+        let str = escape(&str.literal())?;
+
+        Ok(Str(str))
     }
 
-    fn next_token(&mut self) -> Option<LexerError> {
-        self.cur_token = self.peek_token.clone();
-        self.peek_token = self.lexer.next_token().ok()?;
-
-        None
-    }
-
-    fn consume(&mut self, kind: TokenKind) -> PResult<Token> {
-        if self.cur_token.kind() != kind {
-            return Err(ParseConsumeError(kind));
+    /// bool = "true" | "false"
+    fn parse_bool(&mut self) -> PResult<Expression> {
+        if self.consume(TokenKind::True).is_ok() {
+            return Ok(Boolean(true));
         }
 
-        let token = self.cur_token.clone();
-
-        self.next_token()
-            .map_or(Ok(()), |e| Err(ParseNextTokenError(e)))?;
-        Ok(token)
-    }
-
-    fn is_cur(&self, kind: TokenKind) -> bool {
-        self.cur_token.kind() == kind
-    }
-
-    fn is_peek(&self, kind: TokenKind) -> bool {
-        self.peek_token.kind() == kind
+        self.consume(TokenKind::False)?;
+        Ok(Boolean(false))
     }
 }

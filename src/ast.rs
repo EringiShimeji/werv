@@ -7,18 +7,18 @@ pub enum Node {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
-    LetStatement {
+    LetStmt {
         name: Expression,
         value: Expression,
     },
-    FunctionDefStatement {
+    LetFnStmt {
         name: Expression,
         params: Vec<Expression>,
         body: Expression,
     },
-    ReturnStatement(Expression),
-    BlockReturnStatement(Expression),
-    ExprStatement(Expression),
+    ReturnStmt(Expression),
+    BlockReturnStmt(Expression),
+    ExprStmt(Expression),
 }
 impl Into<Node> for Statement {
     fn into(self) -> Node {
