@@ -664,6 +664,26 @@ fn parse_bool_test() {
 }
 
 #[test]
+fn parse_assign_test() {
+    let input = ["a=10", "vec[0]=true"];
+    let expect = [
+        AssignExpr {
+            name: Box::new(Ident("a".into())),
+            value: Box::new(Integer(10)),
+        },
+        AssignExpr {
+            name: Box::new(IndexExpr {
+                expr: Box::new(Ident("vec".into())),
+                index: Box::new(Integer(0)),
+            }),
+            value: Box::new(Boolean(true)),
+        },
+    ];
+
+    loop_test(input, expect, |p| p.parse_assign().unwrap());
+}
+
+#[test]
 fn parse_add_test() {
     let input = [
         "1234567890",

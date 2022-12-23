@@ -218,49 +218,63 @@ impl Parser {
         Ok(BlockExpr(stmts))
     }
 
-    /// comp = add ( "==" add | "!=" add | "<" add | "<=" add | ">" add | ">=" add )
+    /// comp = assign ( "==" assign | "!=" assign | "<" assign | "<=" assign | ">" assign | ">=" assign )
     fn parse_comp(&mut self) -> PResult<Expression> {
-        let mut node = self.parse_add()?;
+        let mut node = self.parse_assign()?;
 
         if self.consume(TokenKind::Eq).is_ok() {
             node = BinaryExpr {
                 kind: Eq,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         } else if self.consume(TokenKind::Ne).is_ok() {
             node = BinaryExpr {
                 kind: Ne,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         } else if self.consume(TokenKind::Lt).is_ok() {
             node = BinaryExpr {
                 kind: Lt,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         } else if self.consume(TokenKind::Le).is_ok() {
             node = BinaryExpr {
                 kind: Le,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         } else if self.consume(TokenKind::Gt).is_ok() {
             node = BinaryExpr {
                 kind: Gt,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         } else if self.consume(TokenKind::Ge).is_ok() {
             node = BinaryExpr {
                 kind: Ge,
                 lhs: Box::new(node),
-                rhs: Box::new(self.parse_add()?),
+                rhs: Box::new(self.parse_assign()?),
             };
         }
 
         Ok(node)
+    }
+
+    /// assign = add ( "=" expr )?
+    fn parse_assign(&mut self) -> PResult<Expression> {
+        let node = self.parse_add()?;
+
+        if self.consume(TokenKind::Assign).is_ok() {
+            return Ok(AssignExpr {
+                name: Box::new(node),
+                value: Box::new(self.parse_expr()?),
+            });
+        }
+
+        return Ok(node);
     }
 
     /// add = mul ( "+" mul | "-" mul )*
@@ -358,7 +372,7 @@ impl Parser {
         Ok(node)
     }
 
-    /// primary = integer | ident ( "=" expr | "(" ( expr ( "," expr )* )? ")" )? | str | bool | array | "(" expr ")"
+    /// primary = integer | ident ( "(" ( expr ( "," expr )* )? ")" )? | str | bool | array | "(" expr ")"
     fn parse_primary(&mut self) -> PResult<Expression> {
         // "(" expr ")"
         if self.consume(TokenKind::LParen).is_ok() {
@@ -368,16 +382,9 @@ impl Parser {
             return Ok(expr);
         }
 
-        // ident ( "=" expr | "(" ( expr ( "," expr )* )? ")" )?
+        // ident ( "(" ( expr ( "," expr )* )? ")" )?
         if self.is_cur(TokenKind::Ident) {
             let name = self.parse_ident()?;
-
-            if self.consume(TokenKind::Assign).is_ok() {
-                return Ok(AssignExpr {
-                    name: Box::new(name),
-                    value: Box::new(self.parse_expr()?),
-                });
-            }
 
             if self.consume(TokenKind::LParen).is_ok() {
                 let mut args = Vec::new();
