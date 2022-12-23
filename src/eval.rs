@@ -8,7 +8,7 @@ use crate::{
     builtin::call_builtin,
     object::{Object, Object::*, NULL},
 };
-use std::collections::BTreeMap;
+use std::{borrow::Borrow, collections::BTreeMap};
 
 type EResult = Result<Object, EvalError>;
 
@@ -316,6 +316,11 @@ impl Environment {
             self.update(name, value)?;
 
             return Ok(NULL);
+        } else if let Expression::IndexExpr { expr, index } = *name {
+            if let Expression::Ident(name) = expr.borrow() {
+                let expr = self.eval(*expr)?;
+                let index = self.eval(*index)?;
+            }
         }
 
         Err(EvalAssignExprError)
